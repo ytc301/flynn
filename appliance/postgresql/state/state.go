@@ -211,6 +211,8 @@ type Peer struct {
 	workDoneCh  chan struct{}
 	retryCh     chan struct{}
 	stopCh      chan struct{}
+
+	closed bool
 }
 
 func NewPeer(self *discoverd.Instance, singleton bool, d Discoverd, pg Postgres, log log15.Logger) *Peer {
@@ -283,8 +285,16 @@ func (p *Peer) Run() {
 	}
 }
 
+func (p *Peer) Stop() error {
+	p.Close()
+	return p.postgres.Stop()
+}
+
 func (p *Peer) Close() error {
-	close(p.stopCh)
+	if !p.closed {
+		close(p.stopCh)
+		p.closed = true
+	}
 	return nil
 }
 
