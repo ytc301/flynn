@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/flynn/flynn/discoverd/client"
 	"github.com/flynn/flynn/logaggregator/ring"
@@ -41,6 +42,10 @@ func main() {
 		shutdown.Fatal(err)
 	}
 
+	if err := a.watch(discoverd.DefaultClient.Service("flynn-logaggregator-syslog")); err != nil {
+		shutdown.Fatal(err)
+	}
+
 	services := map[string]string{
 		"flynn-logaggregator-api":    *apiAddr,
 		"flynn-logaggregator-syslog": *logAddr,
@@ -66,6 +71,11 @@ type Aggregator struct {
 	listener   net.Listener
 	producerwg sync.WaitGroup
 
+	fmu       sync.RWMutex
+	followers map[string]net.Conn
+
+	leaderc chan bool
+
 	once     sync.Once // protects the following:
 	shutdown chan struct{}
 }
@@ -73,9 +83,11 @@ type Aggregator struct {
 // NewAggregator creates a new unstarted Aggregator that will listen on addr.
 func NewAggregator(addr string) *Aggregator {
 	return &Aggregator{
-		Addr:     addr,
-		buffers:  make(map[string]*ring.Buffer),
-		shutdown: make(chan struct{}),
+		Addr:      addr,
+		buffers:   make(map[string]*ring.Buffer),
+		shutdown:  make(chan struct{}),
+		followers: make(map[string]net.Conn),
+		leaderc:   make(chan bool),
 	}
 }
 
@@ -293,4 +305,94 @@ func (a *Aggregator) readLogsFromConn(conn net.Conn) {
 			afterMessage()
 		}
 	}
+}
+
+func (a *Aggregator) watch(srv discoverd.Service) error {
+	eventc := make(chan *discoverd.Event)
+
+	stream, err := srv.Watch(eventc)
+	if err != nil {
+		return err
+	}
+
+	addrs, err := srv.Addrs()
+	if err != nil {
+		return err
+	}
+
+	unreachable := map[string]bool{}
+
+	a.fmu.Lock()
+	defer a.fmu.Unlock()
+	for _, addr := range addrs {
+		if conn := dial(addr); conn != nil {
+			a.followers[addr] = conn
+		} else {
+			unreachable[addr] = true
+		}
+	}
+
+	go func() {
+		reconc := time.Tick(1 * time.Second)
+
+		select {
+		case event, ok := <-eventc:
+			if !ok {
+				// TODO(benburkert): discoverd client conn closed
+				panic("TODO")
+
+				stream.Close()
+				return
+			}
+
+			addr := event.Instance.Addr
+
+			switch event.Kind {
+			case discoverd.EventKindLeader:
+				a.leaderc <- addr == a.Addr
+			case discoverd.EventKindUp:
+				if conn := dial(addr); conn != nil {
+					a.fmu.Lock()
+					a.followers[addr] = conn
+					a.fmu.Unlock()
+				} else {
+					unreachable[addr] = true
+				}
+			case discoverd.EventKindDown:
+				a.fmu.Lock()
+				if conn := a.followers[addr]; conn != nil {
+					delete(a.followers, addr)
+					a.fmu.Unlock()
+
+					if err := conn.Close(); err != nil {
+						log15.Error("follower connection close error", "err", err)
+					}
+				} else {
+					a.fmu.Unlock()
+				}
+
+				delete(unreachable, addr)
+			}
+		case <-reconc:
+			for addr := range unreachable {
+				if conn := dial(addr); conn != nil {
+					delete(unreachable, addr)
+
+					a.fmu.Lock()
+					a.followers[addr] = conn
+					a.fmu.Unlock()
+				}
+			}
+		}
+	}()
+
+	return nil
+}
+
+func dial(addr string) net.Conn {
+	conn, err := net.DialTimeout("tcp", addr, 10*time.Millisecond)
+	if err != nil {
+		log15.Error("follower connection dial error", "err", err)
+	}
+	return conn
 }
