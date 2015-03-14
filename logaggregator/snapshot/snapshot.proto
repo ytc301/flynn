@@ -1,0 +1,10 @@
+package snapshot;
+
+message snapshot {
+  message buffer {
+    required string key = 1;
+    repeated bytes messages = 2;
+  }
+
+  repeated buffer buffers = 1;
+}
