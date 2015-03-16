@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"flag"
+	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/flynn/flynn/discoverd/client"
 	"github.com/flynn/flynn/logaggregator/ring"
+	"github.com/flynn/flynn/logaggregator/snapshot"
 	"github.com/flynn/flynn/pkg/shutdown"
 	"github.com/flynn/flynn/pkg/syslog/rfc5424"
 	"github.com/flynn/flynn/pkg/syslog/rfc6587"
@@ -28,9 +31,25 @@ func main() {
 
 	logAddr := flag.String("logaddr", ":3000", "syslog input listen address")
 	apiAddr := flag.String("apiaddr", ":"+apiPort, "api listen address")
+	snapshotPath := flag.String("snapshot", "", "snapshot path")
 	flag.Parse()
 
-	a := NewAggregator(*logAddr)
+	var a *Aggregator
+	if *snapshotPath == "" {
+		a = NewAggregator(*logAddr)
+	} else {
+		snapshotFile, err := os.Open(*snapshotPath)
+		if err == nil {
+			if a, err = LoadAggregator(*logAddr, snapshotFile); err != nil {
+				shutdown.Fatal(err)
+			}
+		} else if os.IsNotExist(err) {
+			a = NewAggregator(*logAddr)
+		} else {
+			shutdown.Fatal(err)
+		}
+	}
+
 	if err := a.Start(); err != nil {
 		shutdown.Fatal(err)
 	}
@@ -71,6 +90,24 @@ func NewAggregator(addr string) *Aggregator {
 		buffers:  make(map[string]*ring.Buffer),
 		shutdown: make(chan struct{}),
 	}
+}
+
+func LoadAggregator(addr string, r io.Reader) (*Aggregator, error) {
+	data, err := ioutil.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+
+	buffers, err := snapshot.Load(data)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Aggregator{
+		Addr:     addr,
+		buffers:  buffers,
+		shutdown: make(chan struct{}),
+	}, nil
 }
 
 // Start starts the Aggregator on Addr.
@@ -132,6 +169,24 @@ func (a *Aggregator) ReadLastN(
 		}
 	}()
 	return msgc
+}
+
+func (a *Aggregator) TakeSnapshot(w io.Writer) error {
+	// TODO(benburkert): restructure Aggregator & ring.Buffer to avoid nested locks
+	a.bmu.Lock()
+	cbufs := make(map[string]*ring.Buffer, len(a.buffers))
+	for key, buf := range a.buffers {
+		cbufs[key] = buf.Clone()
+	}
+	a.bmu.Unlock()
+
+	data, err := snapshot.Take(cbufs)
+	if err != nil {
+		return err
+	}
+
+	_, err = w.Write(data)
+	return err
 }
 
 // readLastN reads up to N logs from the log buffer with id. If n is less than
