@@ -13,7 +13,7 @@ It has these top-level messages:
 */
 package snapshot
 
-import proto "github.com/gogo/protobuf/proto"
+import proto "github.com/flynn/flynn/Godeps/_workspace/src/github.com/gogo/protobuf/proto"
 import math "math"
 
 // Reference imports to suppress errors if they are not otherwise used.

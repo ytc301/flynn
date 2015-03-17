@@ -1,12 +1,12 @@
 package snapshot
 
+//go:generate protoc --gogo_out=. snapshot.proto
+
 import (
+	"github.com/flynn/flynn/Godeps/_workspace/src/github.com/gogo/protobuf/proto"
 	"github.com/flynn/flynn/logaggregator/ring"
 	"github.com/flynn/flynn/pkg/syslog/rfc5424"
-	"github.com/gogo/protobuf/proto"
 )
-
-//go:generate protoc --gogo_out=. snapshot.proto
 
 func Take(buffers map[string]*ring.Buffer) ([]byte, error) {
 	ss := &Snapshot{
