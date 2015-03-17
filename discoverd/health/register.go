@@ -109,6 +109,19 @@ func (h *heartbeater) SetMeta(meta map[string]string) error {
 	return h.hb.SetMeta(meta)
 }
 
+func (h *heartbeater) UpdateMeta(key, val string) error {
+	h.Lock()
+	defer h.Unlock()
+	if h.Instance.Meta == nil {
+		h.Instance.Meta = make(map[string]string, 1)
+	}
+	h.Instance.Meta[key] = val
+	if h.hb == nil {
+		return nil
+	}
+	return h.hb.UpdateMeta(key, val)
+}
+
 func (h *heartbeater) Close() error {
 	h.stream.Close()
 	h.Lock()

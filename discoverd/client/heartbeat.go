@@ -22,6 +22,7 @@ var EnvInstanceMeta = map[string]struct{}{
 
 type Heartbeater interface {
 	SetMeta(map[string]string) error
+	UpdateMeta(string, string) error
 	Close() error
 	Addr() string
 }
@@ -108,6 +109,16 @@ func (h *heartbeater) SetMeta(meta map[string]string) error {
 	h.Lock()
 	defer h.Unlock()
 	h.inst.Meta = meta
+	return h.c.c.Put(fmt.Sprintf("/services/%s/instances/%s", h.service, h.inst.ID), h.inst, nil)
+}
+
+func (h *heartbeater) UpdateMeta(key, val string) error {
+	h.Lock()
+	defer h.Unlock()
+	if h.inst.Meta == nil {
+		h.inst.Meta = make(map[string]string, 1)
+	}
+	h.inst.Meta[key] = val
 	return h.c.c.Put(fmt.Sprintf("/services/%s/instances/%s", h.service, h.inst.ID), h.inst, nil)
 }
 
