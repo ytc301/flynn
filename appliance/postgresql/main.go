@@ -46,7 +46,7 @@ func main() {
 	})
 	dd := NewDiscoverd(discoverd.DefaultClient.Service(serviceName), log.New("component", "discoverd"))
 
-	peer := state.NewPeer(inst, singleton, dd, pg, log.New("component", "peer"))
+	peer := state.NewPeer(inst, singleton, dd, pg, hb, log.New("component", "peer"))
 	shutdown.BeforeExit(func() { peer.Close() })
 
 	go peer.Run()

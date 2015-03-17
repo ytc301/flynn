@@ -144,7 +144,7 @@ type Postgres interface {
 
 	// Ready returns a channel that returns a single event when the interface
 	// is ready.
-	Ready() <-chan PostgresEvent
+	Events() <-chan PostgresEvent
 }
 
 type Discoverd interface {
@@ -153,6 +153,7 @@ type Discoverd interface {
 }
 
 type PostgresEvent struct {
+	Init   bool
 	Online bool
 	Setup  bool
 }
@@ -193,6 +194,7 @@ type Peer struct {
 	log       log15.Logger
 	discoverd Discoverd
 	postgres  Postgres
+	hb        discoverd.Heartbeater
 
 	// Dynamic state
 	info          atomic.Value // *PeerInfo, replaced after each change
@@ -215,13 +217,14 @@ type Peer struct {
 	closed bool
 }
 
-func NewPeer(self *discoverd.Instance, singleton bool, d Discoverd, pg Postgres, log log15.Logger) *Peer {
+func NewPeer(self *discoverd.Instance, singleton bool, d Discoverd, pg Postgres, hb discoverd.Heartbeater, log log15.Logger) *Peer {
 	p := &Peer{
 		self:        self,
 		singleton:   singleton,
 		postgres:    pg,
 		discoverd:   d,
 		log:         log,
+		hb:          hb,
 		evalStateCh: make(chan struct{}, 1),
 		applyConfCh: make(chan struct{}, 1),
 		stopCh:      make(chan struct{}),
@@ -237,7 +240,7 @@ func (p *Peer) SetDebugChannels(restCh, retryCh chan struct{}) {
 
 func (p *Peer) Run() {
 	discoverdCh := p.discoverd.Events()
-	postgresCh := p.postgres.Ready()
+	postgresCh := p.postgres.Events()
 	for {
 		select {
 		// try to run any pending configuration first
@@ -253,7 +256,7 @@ func (p *Peer) Run() {
 			p.handleDiscoverdEvent(e)
 			continue
 		case e := <-postgresCh:
-			p.handlePgInit(e)
+			p.handlePgEvent(e)
 			continue
 		case <-p.evalStateCh:
 			p.evalClusterState()
@@ -271,7 +274,7 @@ func (p *Peer) Run() {
 		case e := <-discoverdCh:
 			p.handleDiscoverdEvent(e)
 		case e := <-postgresCh:
-			p.handlePgInit(e)
+			p.handlePgEvent(e)
 		case <-p.evalStateCh:
 			p.evalClusterState()
 		case <-p.applyConfCh:
@@ -330,6 +333,14 @@ func (p *Peer) setPgRetryPending(t *time.Time) {
 	p.setInfo(info)
 }
 
+func (p *Peer) handlePgEvent(e PostgresEvent) {
+	if e.Init {
+		p.handlePgInit(e)
+	} else if e.Online {
+		p.handlePgOnline(e)
+	}
+}
+
 func (p *Peer) handlePgInit(e PostgresEvent) {
 	p.log.Info("postgres init", "online", e.Online, "setup", e.Setup)
 	if p.pgOnline != nil {
@@ -342,6 +353,10 @@ func (p *Peer) handlePgInit(e PostgresEvent) {
 	if p.Info().Peers != nil {
 		p.evalClusterState()
 	}
+}
+
+func (p *Peer) handlePgOnline(e PostgresEvent) {
+	p.hb.UpdateMeta("PG_ONLINE", "true")
 }
 
 func (p *Peer) handleDiscoverdEvent(e *DiscoverdEvent) {

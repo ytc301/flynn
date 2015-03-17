@@ -95,7 +95,7 @@ func NewPostgres(c Config) state.Postgres {
 		extWhitelist:   c.ExtWhitelist,
 		shmType:        c.SHMType,
 		waitUpstream:   c.WaitUpstream,
-		events:         make(chan state.PostgresEvent, 1),
+		events:         make(chan state.PostgresEvent, 2),
 		cancelSyncWait: func() {},
 	}
 	p.setRunning(false)
@@ -121,7 +121,7 @@ func NewPostgres(c Config) state.Postgres {
 	if p.replTimeout == 0 {
 		p.replTimeout = 1 * time.Minute
 	}
-	p.events <- state.PostgresEvent{}
+	p.events <- state.PostgresEvent{Init: true}
 	return p
 }
 
@@ -226,7 +226,7 @@ func (p *Postgres) XLogPosition() (xlog.Position, error) {
 	return xlog.Position(res), err
 }
 
-func (p *Postgres) Ready() <-chan state.PostgresEvent {
+func (p *Postgres) Events() <-chan state.PostgresEvent {
 	return p.events
 }
 
@@ -510,6 +510,7 @@ func (p *Postgres) start() error {
 			_, err = p.db.Exec("SELECT 1")
 			if err == nil {
 				log.Info("postgres started")
+				p.events <- state.PostgresEvent{Online: true}
 				return nil
 			}
 		}

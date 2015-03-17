@@ -131,11 +131,30 @@ type simPeer struct {
 	Postgres  *postgresSimulatorClient
 }
 
+type discoverdHeartbeater struct{}
+
+func (d *discoverdHeartbeater) SetMeta(map[string]string) error {
+	return nil
+}
+
+func (d *discoverdHeartbeater) UpdateMeta(key, val string) error {
+	return nil
+}
+
+func (d *discoverdHeartbeater) Close() error {
+	return nil
+}
+
+func (d *discoverdHeartbeater) Addr() string {
+	return ""
+}
+
 func (s *Simulator) createSimPeer() *simPeer {
 	ident := s.newPeerIdent("")
 	dd := s.discoverd.NewClient(ident)
 	pg := s.postgres.NewClient(ident)
-	p := state.NewPeer(ident, s.singleton, dd, pg, s.log.New("component", "peer"))
+	hb := &discoverdHeartbeater{}
+	p := state.NewPeer(ident, s.singleton, dd, pg, hb, s.log.New("component", "peer"))
 	p.SetDebugChannels(s.restCh, s.retryCh)
 
 	return &simPeer{
@@ -670,7 +689,7 @@ func (p *postgresSimulatorClient) Info() *PostgresInfo {
 }
 
 func (p *postgresSimulatorClient) startSimulation() {
-	p.events <- state.PostgresEvent{}
+	p.events <- state.PostgresEvent{Init: true}
 }
 
 func (p *postgresSimulatorClient) XLogPosition() (xlog.Position, error) {
@@ -709,6 +728,7 @@ func (p *postgresSimulatorClient) Start() error {
 
 	p.p.log.Info("starting postgres")
 	time.Sleep(opLag)
+	p.events <- state.PostgresEvent{Online: true}
 	p.Online = true
 	p.updateXlog(p.p.ds.ClusterState())
 
@@ -727,7 +747,7 @@ func (p *postgresSimulatorClient) Stop() error {
 	return nil
 }
 
-func (p *postgresSimulatorClient) Ready() <-chan state.PostgresEvent {
+func (p *postgresSimulatorClient) Events() <-chan state.PostgresEvent {
 	return p.events
 }
 
