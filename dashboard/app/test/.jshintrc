@@ -18,6 +18,7 @@
 	"boss": true,
   "browser": false,
 	"globals": {
+		"casper": false,
 		"require": false,
 		"exports": true
 	}

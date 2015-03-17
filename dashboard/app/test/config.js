@@ -1,4 +1,6 @@
-var env = require('os').env;
+var env = require('system').env;
 exports.config = {
-	dashboardURL: 'http://dashboard.'+ env.CONTROLLER_DOMAIN
+	url: env.URL,
+	loginToken: env.LOGIN_TOKEN,
+	githubToken: env.GITHUB_TOKEN
 };
