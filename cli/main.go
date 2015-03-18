@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"text/tabwriter"
@@ -194,11 +193,7 @@ var config *cfg.Config
 var clusterConf *cfg.Cluster
 
 func configPath() string {
-	p := os.Getenv("FLYNNRC")
-	if p == "" {
-		p = filepath.Join(homedir(), ".flynnrc")
-	}
-	return p
+	return cfg.DefaultPath()
 }
 
 func readConfig() (err error) {

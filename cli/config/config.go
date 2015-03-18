@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
+	"runtime"
 
 	"github.com/flynn/flynn/Godeps/_workspace/src/github.com/BurntSushi/toml"
 )
@@ -21,6 +23,23 @@ type Cluster struct {
 type Config struct {
 	Default  string     `toml:"default"`
 	Clusters []*Cluster `toml:"cluster"`
+}
+
+// copied from cli/main.go
+func homedir() string {
+	home := os.Getenv("HOME")
+	if home == "" && runtime.GOOS == "windows" {
+		return os.Getenv("%APPDATA%")
+	}
+	return home
+}
+
+func DefaultPath() string {
+	p := os.Getenv("FLYNNRC")
+	if p == "" {
+		p = filepath.Join(homedir(), ".flynnrc")
+	}
+	return p
 }
 
 func ReadFile(path string) (*Config, error) {
